@@ -1,11 +1,18 @@
-version: '3.8'
-
 services:
   thames-water-service:
     build: .
     container_name: thames-water-service
     restart: unless-stopped
     hostname: thames-water-service
+
+    # Run tini as PID 1 so zombie chromium subprocesses are reaped.
+    # Without this, uvicorn becomes PID 1 and never wait()s on orphaned
+    # Chrome children, so they pile up until fork() fails inside the container.
+    init: true
+
+    # Hard cap on processes to fail loudly if a leak ever recurs,
+    # rather than silently accumulating thousands of zombies.
+    pids_limit: 200
 
     ports:
       - "8096:8096"
@@ -17,24 +24,22 @@ services:
       # Service logs
       - ./logs:/app/logs
 
+    # Secrets are loaded from .env via env_file rather than ${VAR} interpolation,
+    # because Compose v2 double-interpolates the result of ${VAR} expansion. A
+    # password containing literal `$` characters then gets eaten as an undefined
+    # variable reference and ends up empty in the container.
+    env_file:
+      - .env
+
     environment:
+      # seleniarm base image sets HOME=/home/seluser, which appuser (uid 1000)
+      # cannot write; chromium's crashpad then kills every scraper launch.
+      # Bind-mounted data/ and logs/ on the host must also be owned by uid 1000.
+      - HOME=/tmp
       - PORT=8096
       - LOG_LEVEL=info
       - DB_PATH=/app/data/thames_water.db
       - SPIKE_THRESHOLD=800
-      - NOTIFICATION_EMAIL=${NOTIFICATION_EMAIL:-}
-      - SERVICE_URL=${SERVICE_URL:-http://localhost:8096}
-
-      # Thames Water credentials (from .env file)
-      - THAMES_WATER_EMAIL=${THAMES_WATER_EMAIL}
-      - THAMES_WATER_PASSWORD=${THAMES_WATER_PASSWORD}
-      - THAMES_WATER_API_KEY=${THAMES_WATER_API_KEY}
-
-      # SMTP configuration (optional)
-      - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USERNAME=${SMTP_USERNAME:-}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
 
       # Scheduler configuration
       - DAILY_FETCH_HOUR=6

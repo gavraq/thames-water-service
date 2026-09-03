@@ -1238,6 +1238,27 @@ class ThamesWaterExtractor:
         finally:
             self.close()
 
+    def _select_view_option(self, option_text: str, timeout: int = 60) -> bool:
+        """Poll for a <select> containing option_text and select it.
+
+        The my-meters-usage SPA renders its dropdowns well after page load, so
+        a fixed post-navigation sleep is not enough (empty syncs, 2026-09-03).
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            for sel in self.driver.find_elements(By.TAG_NAME, "select"):
+                try:
+                    select_obj = Select(sel)
+                    if option_text in [o.text for o in select_obj.options]:
+                        select_obj.select_by_visible_text(option_text)
+                        logger.info(f"Selected '{option_text}' view")
+                        time.sleep(3)
+                        return True
+                except Exception:
+                    continue
+            time.sleep(2)
+        return False
+
     def _extract_last_30_days(self) -> list[DailyUsage]:
         """
         Extract daily data by selecting 'Monthly (by days)' and 'Last 30 days' dropdowns.
@@ -1254,25 +1275,8 @@ class ThamesWaterExtractor:
         records = []
 
         try:
-            # Step 1: Select "Monthly (by days)" view
-            selects = self.driver.find_elements(By.TAG_NAME, "select")
-            monthly_view_selected = False
-
-            for sel in selects:
-                try:
-                    select_obj = Select(sel)
-                    options = [o.text for o in select_obj.options]
-
-                    if "Monthly (by days)" in options:
-                        select_obj.select_by_visible_text("Monthly (by days)")
-                        logger.info("Selected 'Monthly (by days)' view")
-                        monthly_view_selected = True
-                        time.sleep(3)
-                        break
-                except Exception:
-                    continue
-
-            if not monthly_view_selected:
+            # Step 1: Select "Monthly (by days)" view (polls while the SPA renders)
+            if not self._select_view_option("Monthly (by days)"):
                 logger.warning("Could not find 'Monthly (by days)' option")
                 return records
 
@@ -1348,25 +1352,8 @@ class ThamesWaterExtractor:
         attempted_date = None
 
         try:
-            # Step 1: Select "Daily (by hours)" view
-            selects = self.driver.find_elements(By.TAG_NAME, "select")
-            daily_view_selected = False
-
-            for sel in selects:
-                try:
-                    select_obj = Select(sel)
-                    options = [o.text for o in select_obj.options]
-
-                    if "Daily (by hours)" in options:
-                        select_obj.select_by_visible_text("Daily (by hours)")
-                        logger.info("Selected 'Daily (by hours)' view")
-                        daily_view_selected = True
-                        time.sleep(3)
-                        break
-                except Exception:
-                    continue
-
-            if not daily_view_selected:
+            # Step 1: Select "Daily (by hours)" view (polls while the SPA renders)
+            if not self._select_view_option("Daily (by hours)"):
                 logger.warning("Could not find 'Daily (by hours)' option")
                 return records, attempted_date
 
